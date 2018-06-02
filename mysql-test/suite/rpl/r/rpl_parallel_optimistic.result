@@ -543,6 +543,52 @@ a	b
 57	7
 58	8
 59	9
+DELETE FROM t1;
+DELETE FROM t2;
+include/save_master_gtid.inc
+include/sync_with_master_gtid.inc
+SET sql_log_bin=0;
+CREATE FUNCTION foo(x INT, d1 VARCHAR(500), d2 VARCHAR(500))
+RETURNS INT DETERMINISTIC
+BEGIN
+RETURN x;
+END
+||
+SET sql_log_bin=1;
+SET sql_log_bin=0;
+CREATE FUNCTION foo(x INT, d1 VARCHAR(500), d2 VARCHAR(500))
+RETURNS INT DETERMINISTIC
+BEGIN
+IF d1 != '' THEN
+SET debug_sync = d1;
+END IF;
+IF d2 != '' THEN
+SET debug_sync = d2;
+END IF;
+RETURN x;
+END
+||
+SET sql_log_bin=1;
+BEGIN;
+INSERT INTO t2 SET a=1;
+SET @save.binlog_format=@@session.binlog_format;
+SET @@SESSION.binlog_format=statement;
+BEGIN;
+INSERT INTO t2 SET a=1;
+INSERT INTO t1 SET a=1;
+COMMIT;
+SET @@SESSION.binlog_format=mixed;
+BEGIN;
+INSERT INTO t2 SET a=foo(100, 'rpl_parallel_retry_after_unmark WAIT_FOR go_retrying', '');
+DELETE FROM t1 WHERE a=sleep(0) + 1;
+COMMIT;
+ROLLBACK;
+SET debug_sync='now SIGNAL go_retrying';
+SET @@SESSION.binlog_format= @save.binlog_format;
+DROP FUNCTION foo;
+include/save_master_gtid.inc
+include/sync_with_master_gtid.inc
+SET debug_sync='RESET';
 include/stop_slave.inc
 SET GLOBAL slave_parallel_mode=@old_parallel_mode;
 SET GLOBAL slave_parallel_threads=@old_parallel_threads;

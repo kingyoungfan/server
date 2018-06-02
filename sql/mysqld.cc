@@ -3487,6 +3487,28 @@ static void check_data_home(const char *path)
 #endif /*!EMBEDDED_LIBRARY*/
 #endif	/* __WIN__*/
 
+/**
+  Helper function for @c my_message_sql() to decide
+  how to errorlog for the slave thread worker
+  when it executes in the OPTIMISTIC parallel mode. A persistent
+  error by the slave worker does not escape being left out to
+  the driver thread to report.
+*/
+inline void fix_func_for_slave_worker(THD *thd,
+                                      sql_print_message_func *ptr_func)
+{
+  DBUG_ASSERT(!(thd && thd->system_thread == SYSTEM_THREAD_SLAVE_SQL) ||
+              thd->rgi_slave);
+
+  if (thd && thd->system_thread == SYSTEM_THREAD_SLAVE_SQL &&
+      thd->rgi_slave->speculation == rpl_group_info::SPECULATE_OPTIMISTIC)
+  {
+    if (global_system_variables.log_warnings > 1)
+    {
+      *ptr_func= sql_print_warning;
+    }
+  }
+}
 
 /**
   All global error messages are sent here where the first one is stored
@@ -3535,6 +3557,7 @@ void my_message_sql(uint error, const char *str, myf MyFlags)
   /* When simulating OOM, skip writing to error log to avoid mtr errors */
   DBUG_EXECUTE_IF("simulate_out_of_memory", DBUG_VOID_RETURN;);
 
+  fix_func_for_slave_worker(thd, &func);
   if (!thd || thd->log_all_errors || (MyFlags & ME_NOREFRESH))
     (*func)("%s: %s", my_progname_short, str); /* purecov: inspected */
   DBUG_VOID_RETURN;
